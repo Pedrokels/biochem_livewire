@@ -38,4 +38,13 @@
             </div>
         </div>
     </div>
+    <script>
+        @if ($errors->has('ConsolidationFile'))
+            const toastElement = document.getElementById('errorToast');
+            if (toastElement) {
+                const toast = new bootstrap.Toast(toastElement);
+                toast.show();
+            }
+        @endif
+    </script>
 </div>

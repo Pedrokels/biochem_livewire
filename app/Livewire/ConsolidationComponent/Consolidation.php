@@ -2,17 +2,12 @@
 
 namespace App\Livewire\ConsolidationComponent;
 
-use App\Models\F11Model;
 use Livewire\Attributes\Title;
 use Livewire\WithFileUploads;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use ZipArchive;
-use Illuminate\Support\Facades\Schema;
-use App\Models\LocalAreaListingsModel;
 
 #[Title('Consolidation')]
 class Consolidation extends Component
@@ -24,11 +19,8 @@ class Consolidation extends Component
 
     public function ConsolidationSave()
     {
-        try {
-            // Ensure a file is uploaded
-            if (!$this->ConsolidationFile) {
-                throw new \Exception('No file uploaded.');
-            }
+        // Ensure a file is uploaded
+        if ($this->ConsolidationFile) {
 
             // Store the uploaded zip file temporarily
             $path = $this->ConsolidationFile->store('temp');
@@ -38,76 +30,54 @@ class Consolidation extends Component
 
             // Initialize ZipArchive to open the zip file
             $zip = new ZipArchive;
-            if ($zip->open($fullPath) !== TRUE) {
-                throw new \Exception('Failed to open the zip file.');
-            }
+            if ($zip->open($fullPath) === TRUE) {
 
-            // Extract the contents of the zip file to a temp directory
-            $extractPath = storage_path('app/temp/unzipped/');
-            $zip->extractTo($extractPath);
-            $zip->close();
+                // Extract the contents of the zip file to a temp directory
+                $extractPath = storage_path('app/temp/unzipped/');
+                $zip->extractTo($extractPath);
+                $zip->close();
 
-            // Get all CSV files from the extracted directory
-            $csvFiles = glob($extractPath . '*.csv');
+                // Get all CSV files from the extracted directory
+                $csvFiles = glob($extractPath . '*.csv');
 
-            foreach ($csvFiles as $csvFile) {
-                // Read the contents of the CSV file
-                $csvData = array_map('str_getcsv', file($csvFile));
-                if (empty($csvData)) {
-                    throw new \Exception('CSV file is empty.');
+                // Initialize an array to hold the contents of each CSV file
+                $csvFileNames = [];
+
+                foreach ($csvFiles as $csvFile) {
+                    $csvFileName = basename($csvFile);
+                    $csvFileNames[] = $csvFileName;
+                    // Read the contents of the CSV file
+                    $csvData = array_map('str_getcsv', file($csvFile));
                 }
 
-                // Extract the header and data
-                $header = $csvData[0];
-                $rows = array_slice($csvData, 1);
+                // Dump all relevant variables and the extracted CSV data
+                // dd([
+                //     'ConsolidationFile' => $this->ConsolidationFile,
+                //     'ExtractedFiles' => $csvFiles,
+                //     'CSVData' => $csvData,
+                //     'Filenames' => $csvFileNames,
+                // ]);
 
-                // Check the filename to determine the target table
-                $filename = basename($csvFile);
-                $tableName = null;
-                if (strpos($filename, 'f11') === 0) {
-                    $tableName = 'f11_conso';
-                } elseif (strpos($filename, 'localarea_listings') === 0) {
-                    $tableName = 'localarea_listings_conso';
-                }
-
-                if ($tableName) {
-                    // Get the columns of the target table
-                    $tableColumns = Schema::getColumnListing($tableName);
-
-                    // Check if CSV header matches the table structure
-                    if ($header !== $tableColumns) {
-                        throw new \Exception("CSV file structure does not match the $tableName table structure.");
+                // Determine the table name based on file names
+                foreach ($csvFileNames as $fileName) {
+                    if (strpos($fileName, 'f11') !== false) {
+                        $tableName = 'f11_conso';
+                        break;
+                    } elseif (strpos($fileName, 'localarea_listings') !== false) {
+                        $tableName = 'localarea_listings_conso';
+                        break;
                     }
-
-                    // Prepare the data for insertion
-                    $insertData = [];
-                    foreach ($rows as $row) {
-                        $rowData = array_combine($header, $row);
-                        $insertData[] = $rowData;
-                    }
-
-                    dd($rowData);
-                    // if ($tableName == 'localarea_listings_conso') {
-                    //     LocalAreaListingsModel::insert($insertData);
-                    // } else {
-                    //     F11Model::insert($insertData);
-                    // }
-
-                    // Insert the data into the table
-
-                } else {
-                    // Log or dispatch an error if the filename doesn't match expected patterns
-                    Log::error("Unrecognized file pattern: {$filename}");
                 }
-            }
 
-            // Clean up temporary files
-            Storage::deleteDirectory('temp/unzipped/');
-            Storage::delete($path);
-        } catch (\Exception $e) {
-            // Handle any errors that occur
-            Log::error('Error in ConsolidationSave: ' . $e->getMessage());
-            $this->dispatch('error', ['message' => $e->getMessage()]);
+                // Dump the table name for debugging
+                dd(['TableName' => $tableName]);
+            } else {
+                // If the zip file cannot be opened, throw an error
+                dd('Failed to open the zip file.');
+            }
+        } else {
+            // No file was uploaded
+            dd('No file uploaded.');
         }
     }
 
