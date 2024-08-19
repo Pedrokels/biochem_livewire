@@ -2,85 +2,192 @@
 
 namespace App\Livewire\ConsolidationComponent;
 
+use App\Models\F11Model;
+use App\Models\LocalAreaListingsModel;
 use Livewire\Attributes\Title;
 use Livewire\WithFileUploads;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
 use Illuminate\Support\Facades\Storage;
 use ZipArchive;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\File;
 
 #[Title('Consolidation')]
 class Consolidation extends Component
 {
     use WithFileUploads;
-
-    #[Validate('file|mimes:zip|max:1024')]
     public $ConsolidationFile;
 
+    #[Validate(['file|mimes:zip|max:1024'])]
     public function ConsolidationSave()
     {
-        // Ensure a file is uploaded
-        if ($this->ConsolidationFile) {
+        if (!$this->ConsolidationFile) {
+            return;
+        }
+        // Store the uploaded zip file temporarily
+        $path = $this->ConsolidationFile->store('temp');
+        // Extract the contents of the zip file
+        $zip = new \ZipArchive();
+        $zip->open(storage_path('app/' . $path));
+        $extractPath = storage_path('app/temp/extracted');
+        $zip->extractTo($extractPath);
+        $zip->close();
 
-            // Store the uploaded zip file temporarily
-            $path = $this->ConsolidationFile->store('temp');
+        // Initialize variables to store success or failure of insertions
+        $insertSuccess = true;
 
-            // Get the full path of the uploaded file
-            $fullPath = Storage::path($path);
+        // Arrays to hold data for bulk insert
+        $f11Data = [];
+        $localAreaListingsData = [];
 
-            // Initialize ZipArchive to open the zip file
-            $zip = new ZipArchive;
-            if ($zip->open($fullPath) === TRUE) {
+        // Loop through the extracted files
+        foreach (glob($extractPath . '/*.csv') as $csvFile) {
+            $fileName = basename($csvFile);
 
-                // Extract the contents of the zip file to a temp directory
-                $extractPath = storage_path('app/temp/unzipped/');
-                $zip->extractTo($extractPath);
-                $zip->close();
+            // Read the CSV file data
+            $csvData = array_map('str_getcsv', file($csvFile));
 
-                // Get all CSV files from the extracted directory
-                $csvFiles = glob($extractPath . '*.csv');
+            // Skip the header row
+            $header = array_shift($csvData);
 
-                // Initialize an array to hold the contents of each CSV file
-                $csvFileNames = [];
+            // Sanitize headers to remove any extra spaces
+            $header = array_map('trim', $header);
 
-                foreach ($csvFiles as $csvFile) {
-                    $csvFileName = basename($csvFile);
-                    $csvFileNames[] = $csvFileName;
-                    // Read the contents of the CSV file
-                    $csvData = array_map('str_getcsv', file($csvFile));
+            // Filter out empty headers
+            $header = array_filter($header);
+
+            // Insert the data into the corresponding table
+            foreach ($csvData as $row) {
+                // Ensure the row matches the header in length by padding with nulls
+                $row = array_pad($row, count($header), null);
+
+                // Combine header and row to create associative array
+                $data = array_combine($header, $row);
+
+                // Check for `id` and remove it if present
+                if (isset($data['id'])) {
+                    unset($data['id']);
+                }
+                if (isset($data['date_inserted'])) {
+                    unset($data['date_inserted']);
                 }
 
-                // Dump all relevant variables and the extracted CSV data
-                // dd([
-                //     'ConsolidationFile' => $this->ConsolidationFile,
-                //     'ExtractedFiles' => $csvFiles,
-                //     'CSVData' => $csvData,
-                //     'Filenames' => $csvFileNames,
-                // ]);
-
-                // Determine the table name based on file names
-                foreach ($csvFileNames as $fileName) {
-                    if (strpos($fileName, 'f11') !== false) {
-                        $tableName = 'f11_conso';
-                        break;
-                    } elseif (strpos($fileName, 'localarea_listings') !== false) {
-                        $tableName = 'localarea_listings_conso';
-                        break;
-                    }
+                // Separate data for F11Model and LocalAreaListingsModel
+                if (str_starts_with($fileName, 'f11')) {
+                    $f11Data[] = $data;
+                } elseif (str_starts_with($fileName, 'localarea_listings')) {
+                    $localAreaListingsData[] = $data;
                 }
-
-                // Dump the table name for debugging
-                dd(['TableName' => $tableName]);
-            } else {
-                // If the zip file cannot be opened, throw an error
-                dd('Failed to open the zip file.');
             }
+        }
+
+        // Perform bulk insert for F11Model
+        try {
+            $successConso = F11Model::insert($f11Data);
+        } catch (\Exception $e) {
+            $insertSuccess = false;
+            dd('Insert failed for F11Model', $e->getMessage());
+        }
+
+        // Perform bulk insert for LocalAreaListingsModel
+        try {
+            $successConso = LocalAreaListingsModel::insert($localAreaListingsData);
+        } catch (\Exception $e) {
+            $insertSuccess = false;
+            dd('Insert failed for LocalAreaListingsModel', $e->getMessage());
+        }
+
+        // Clean up the temporary files
+        Storage::delete($path);
+        File::deleteDirectory($extractPath);
+
+        // Dump the result of the insertion
+        if ($insertSuccess) {
+            $this->dispatch('success-consolidation', success: $successConso);
+            // dd('Insert successful');
         } else {
-            // No file was uploaded
-            dd('No file uploaded.');
+            dd('Insert failed');
         }
     }
 
+
+    // public function ConsolidationSave()
+    // {
+    //     if (!$this->ConsolidationFile) {
+    //         return;
+    //     }
+
+    //     // Store the uploaded zip file temporarily
+    //     $path = $this->ConsolidationFile->store('temp');
+
+    //     // Extract the contents of the zip file
+    //     $zip = new \ZipArchive();
+    //     $zip->open(storage_path('app/' . $path));
+    //     $extractPath = storage_path('app/temp/extracted');
+    //     $zip->extractTo($extractPath);
+    //     $zip->close();
+
+    //     // Initialize variables to store success or failure of insertions
+    //     $insertSuccess = true;
+
+    //     // Arrays to hold data for bulk insert
+    //     $f11Data = [];
+    //     $localAreaListingsData = [];
+
+    //     // Loop through the extracted files
+    //     foreach (glob($extractPath . '/*.csv') as $csvFile) {
+    //         $fileName = basename($csvFile);
+
+    //         // Read the CSV file data
+    //         $csvData = array_map('str_getcsv', file($csvFile));
+
+    //         // Skip the header row
+    //         $header = array_shift($csvData);
+
+    //         // Insert the data into the corresponding table
+    //         foreach ($csvData as $row) {
+    //             // Ensure the row matches the header in length by padding with nulls
+    //             $row = array_pad($row, count($header), null);
+
+    //             $data = array_combine($header, $row);
+
+    //             // Separate data for F11Model and LocalAreaListingsModel
+    //             if (str_starts_with($fileName, 'f11')) {
+    //                 $f11Data[] = $data;
+    //             } elseif (str_starts_with($fileName, 'localarea_listings')) {
+    //                 $localAreaListingsData[] = $data;
+    //             }
+    //         }
+    //     }
+
+    //     // Perform bulk insert for F11Model
+    //     try {
+    //         F11Model::insert($f11Data);
+    //     } catch (\Exception $e) {
+    //         $insertSuccess = false;
+    //         dd('Insert failed for F11Model', $e->getMessage());
+    //     }
+
+    //     // Perform bulk insert for LocalAreaListingsModel
+    //     try {
+    //         LocalAreaListingsModel::insert($localAreaListingsData);
+    //     } catch (\Exception $e) {
+    //         $insertSuccess = false;
+    //         dd('Insert failed for LocalAreaListingsModel', $e->getMessage());
+    //     }
+
+    //     // Clean up the temporary files
+    //     Storage::delete($path);
+    //     File::deleteDirectory($extractPath);
+
+    //     // Dump the result of the insertion
+    //     if ($insertSuccess) {
+    //         dd('Insert successful');
+    //     } else {
+    //         dd('Insert failed');
+    //     }
+    // }
     public function render()
     {
         return view('livewire.consolidation-component.consolidation');

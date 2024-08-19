@@ -38,6 +38,9 @@
             </div>
         </div>
     </div>
+
+    @livewire('consolidation-component.inserted-consolidation-component-sub.consolidation-success')
+
     <script>
         @if ($errors->has('ConsolidationFile'))
             const toastElement = document.getElementById('errorToast');
